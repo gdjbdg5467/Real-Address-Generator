@@ -4,21 +4,36 @@ addEventListener('fetch', event => {
 
 async function handleRequest(request) {
   const { searchParams } = new URL(request.url)
-  const country = searchParams.get('country') || getRandomCountry()
+  const country = (searchParams.get('country') || getRandomCountry()).toUpperCase()
   let address, name, gender, phone
 
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 20; i++) {
     const location = getRandomLocationInCountry(country)
-    const apiUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${location.lat}&lon=${location.lng}&zoom=18&addressdetails=1`
+    const apiUrl = `https://photon.komoot.io/reverse?lon=${location.lng}&lat=${location.lat}`
 
-    const response = await fetch(apiUrl, {
-      headers: { 'User-Agent': 'Cloudflare Worker' }
-    })
-    const data = await response.json()
+    let data
+    try {
+      const response = await fetch(apiUrl, {
+        headers: { 'User-Agent': 'Cloudflare Worker' }
+      })
+      data = await response.json()
+    } catch (e) {
+      // Photon 偶发失败，继续尝试下一个点
+      continue
+    }
 
-    if (data && data.address && data.address.house_number && data.address.road && (data.address.city || data.address.town)) {
-      address = formatAddress(data.address, country)
-      break
+    const props = data && data.features && data.features[0] ? data.features[0].properties : null
+    if (props) {
+      const addr = {
+        house_number: props.housenumber || '',
+        road: props.street || props.name || '',
+        city: props.city || props.town || props.locality || props.district || props.suburb || '',
+        postcode: props.postcode || ''
+      }
+      if (addr.road && addr.city) {
+        address = formatAddress(addr, country)
+        break
+      }
     }
   }
 
@@ -301,7 +316,7 @@ function getRandomLocationInCountry(country) {
     "NG": [{ lat: 6.5244, lng: 3.3792 }, { lat: 9.0579, lng: 7.4951 }], 
     "ID": [{ lat: -6.2088, lng: 106.8456 }, { lat: -7.7956, lng: 110.3695 }] 
   }
-  const coordsArray = countryCoordinates[country]
+  const coordsArray = countryCoordinates[country] || countryCoordinates['US']
   const randomCity = coordsArray[Math.floor(Math.random() * coordsArray.length)]
   const lat = randomCity.lat + (Math.random() - 0.5) * 0.1
   const lng = randomCity.lng + (Math.random() - 0.5) * 0.1
@@ -309,7 +324,10 @@ function getRandomLocationInCountry(country) {
 }
 
 function formatAddress(address, country) {
-  return `${address.house_number} ${address.road}, ${address.city || address.town || address.village}, ${address.postcode || ''}, ${country}`;
+  const houseRoad = [address.house_number, address.road].filter(Boolean).join(' ')
+  const city = address.city || address.town || address.village || ''
+  const tail = [city, address.postcode].filter(Boolean).join(', ')
+  return [houseRoad, tail, country].filter(Boolean).join(', ')
 }
 
 
@@ -436,7 +454,7 @@ function getRandomPhoneNumber(country) {
       return `+62 ${areaCode} ${number}`
     }
   }
-  return phoneFormats[country]()
+  return (phoneFormats[country] || phoneFormats['US'])()
 }
 
 function getRandomCountry() {
